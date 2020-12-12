@@ -12,6 +12,15 @@ import (
 	"time"
 )
 
+type channel struct {
+	ID          string
+	Name        string
+	CreatedAt   int64
+	Topic       string
+	Description string
+	MemberNum   int64
+}
+
 type responseJSON struct {
 	Channels []channelsJSON `json:"channels"`
 	MetaData metaDataJSON   `json:"response_metadata"`
@@ -23,7 +32,7 @@ type channelsJSON struct {
 	CreatedAt   int64           `json:"created"`
 	Topic       topicJSON       `json:"topic"`
 	Description descriptionJSON `json:"purpose"`
-	MembersNum  int64           `json:"num_members"`
+	MemberNum   int64           `json:"num_members"`
 }
 
 type topicJSON struct {
@@ -43,6 +52,17 @@ const (
 	slackPostMessageAPIURL = "https://slack.com/api/chat.postMessage"
 )
 
+var slackWorkSpaceURL string
+var postChannel string
+var token string
+
+func init() {
+	workSpace := os.Getenv("WORK_SPACE")
+	slackWorkSpaceURL = fmt.Sprintf("https://%s/archives/", workSpace)
+	postChannel = os.Getenv("POST_CHANNEL")
+	token = os.Getenv("TOKEN")
+}
+
 func main() {
 	flag.Parse()
 	targetDateStr := flag.Arg(0)
@@ -51,21 +71,35 @@ func main() {
 	if flag.Arg(0) == "" {
 		targetDateStr = time.Now().AddDate(0, 0, -1).Format("20060102")
 	}
-	targetDate, err := time.Parse("20060102", targetDateStr)
+	targetDateTime, err := time.Parse("20060102", targetDateStr)
 	if err != nil {
 		fmt.Println(err)
 	}
-	targetDateUnixTime := targetDate.Unix()
-
-	workSpace := os.Getenv("WORK_SPACE")
-	slackWorkSpaceURL := fmt.Sprintf("https://%s/archives/", workSpace)
-	postChannel := os.Getenv("POST_CHANNEL")
-	token := os.Getenv("TOKEN")
 
 	client := http.Client{}
+	channels := findChannelAfterTargetDate(client, targetDateTime)
+	message := makeSlackSendText(targetDateTime, channels)
+	sendMessage(client, message)
+}
 
+func findChannelAfterTargetDate(client http.Client, targetDateTime time.Time) []channel {
+	allChannels := findAllChannel(client)
+	targetDateUnixTime := targetDateTime.Unix()
+
+	var channels []channel
+	for _, v := range allChannels {
+		if targetDateUnixTime > v.CreatedAt {
+			continue
+		}
+		channels = append(channels, v)
+	}
+
+	return channels
+}
+
+func findAllChannel(client http.Client) []channel {
+	var resJSON []responseJSON
 	var cursor string
-	sendText := []string{fmt.Sprintf("%s%s\n", targetDate.Format("2006/01/02"), "以降に作成されたチャンネル一覧")}
 
 	for {
 		req, err := http.NewRequest("GET", slackGetChannelAPIURL, nil)
@@ -93,29 +127,8 @@ func main() {
 		if err != nil {
 			fmt.Println(err)
 		}
-
-		for _, v := range responseJSON.Channels {
-			if targetDateUnixTime > v.CreatedAt {
-				continue
-			}
-
-			sendText = append(sendText, "==================================\n")
-			sendText = append(sendText, fmt.Sprintf("%s<%s/%s|#%s>\n", "チャンネル名:", slackWorkSpaceURL, v.ID, v.Name))
-			sendText = append(sendText, fmt.Sprintf("%s%d\n", "参加人数:", v.MembersNum))
-
-			t := time.Unix(v.CreatedAt, 0)
-			sendText = append(sendText, fmt.Sprintf("%s%s\n", "作成日:", t.Format("2006/01/02")))
-
-			if v.Topic.Value != "" {
-				sendText = append(sendText, fmt.Sprintf("%s%s\n", "トピック:", v.Topic.Value))
-			}
-
-			if v.Description.Value != "" {
-				sendText = append(sendText, fmt.Sprintf("%s%s\n", "説明:", v.Description.Value))
-			}
-		}
-
 		res.Body.Close()
+		resJSON = append(resJSON, responseJSON)
 
 		if responseJSON.MetaData.NextCursor == "" {
 			break
@@ -123,12 +136,46 @@ func main() {
 		cursor = responseJSON.MetaData.NextCursor
 	}
 
-	sendText = append(sendText, "==================================\n")
+	var channels []channel
+	for _, vRes := range resJSON {
+		for _, v := range vRes.Channels {
+			channel := channel{ID: v.ID, Name: v.Name, CreatedAt: v.CreatedAt, Topic: v.Topic.Value, Description: v.Description.Value, MemberNum: v.MemberNum}
+			channels = append(channels, channel)
+		}
+	}
 
+	return channels
+}
+
+func makeSlackSendText(targetDateTime time.Time, channels []channel) []string {
+	sendText := []string{fmt.Sprintf("%s%s\n", targetDateTime.Format("2006/01/02"), "以降に作成されたチャンネル一覧")}
+	for _, v := range channels {
+
+		sendText = append(sendText, "====================================\n")
+		sendText = append(sendText, fmt.Sprintf("%s<%s/%s|#%s>\n", "チャンネル名:", slackWorkSpaceURL, v.ID, v.Name))
+		sendText = append(sendText, fmt.Sprintf("%s%d\n", "参加人数:", v.MemberNum))
+
+		t := time.Unix(v.CreatedAt, 0)
+		sendText = append(sendText, fmt.Sprintf("%s%s\n", "作成日:", t.Format("2006/01/02")))
+
+		if v.Topic != "" {
+			sendText = append(sendText, fmt.Sprintf("%s%s\n", "トピック:", v.Topic))
+		}
+
+		if v.Description != "" {
+			sendText = append(sendText, fmt.Sprintf("%s%s\n", "説明:", v.Description))
+		}
+	}
+
+	sendText = append(sendText, "====================================\n")
+	return sendText
+}
+
+func sendMessage(client http.Client, message []string) {
 	values := url.Values{}
 	values.Set("token", token)
 	values.Add("channel", postChannel)
-	values.Add("text", strings.Join(sendText, "\n"))
+	values.Add("text", strings.Join(message, "\n"))
 	request, err := http.NewRequest("POST", slackPostMessageAPIURL, strings.NewReader(values.Encode()))
 	if err != nil {
 		fmt.Println(err)
