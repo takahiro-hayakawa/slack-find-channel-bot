@@ -14,9 +14,11 @@ import (
 
 type responseJSON struct {
 	Channels []channelsJSON `json:"channels"`
+	MetaData metaDataJSON   `json:"response_metadata"`
 }
 
 type channelsJSON struct {
+	ID          string          `json:"id"`
 	Name        string          `json:"name"`
 	CreatedAt   int64           `json:"created"`
 	Topic       topicJSON       `json:"topic"`
@@ -31,8 +33,12 @@ type descriptionJSON struct {
 	Value string `json:"value"`
 }
 
+type metaDataJSON struct {
+	NextCursor string `json:"next_cursor"`
+}
+
 const (
-	slackGetChannelAPIURL  = "https://slack.com/api/conversations.list?token="
+	slackGetChannelAPIURL  = "https://slack.com/api/conversations.list"
 	slackPostMessageAPIURL = "https://slack.com/api/chat.postMessage"
 )
 
@@ -48,52 +54,74 @@ func main() {
 	if err != nil {
 		fmt.Println(err)
 	}
-
 	targetDateUnixTime := targetDate.Unix()
 
+	workSpace := os.Getenv("WORK_SPACE")
+	slackWorkSpaceURL := fmt.Sprintf("https://%s/archives/", workSpace)
 	postChannel := os.Getenv("POST_CHANNEL")
-
 	token := os.Getenv("TOKEN")
-	reqURL := fmt.Sprintf("%s%s", slackGetChannelAPIURL, token)
 
 	client := http.Client{}
 
-	req, err := http.NewRequest("GET", reqURL, nil)
-	res, err := client.Do(req)
-	if err != nil {
-		fmt.Println(err)
-	}
+	var cursor string
+	sendText := []string{fmt.Sprintf("%s%s\n", targetDate.Format("2006/01/02"), "以降に作成されたチャンネル一覧")}
 
-	defer res.Body.Close()
-	body, err := ioutil.ReadAll(res.Body)
+	for {
+		req, err := http.NewRequest("GET", slackGetChannelAPIURL, nil)
+		if err != nil {
+			fmt.Println(err)
+		}
+		params := req.URL.Query()
+		params.Add("limit", "1000")
+		params.Add("token", token)
 
-	var responseJSON responseJSON
-	err = json.Unmarshal(body, &responseJSON)
-	if err != nil {
-		fmt.Println(err)
-	}
+		if cursor != "" {
+			params.Add("cursor", cursor)
+		}
+		req.URL.RawQuery = params.Encode()
 
-	sendText := []string{fmt.Sprintf("%s%s%s", targetDate.Format("2006/01/02"), "以降に作成されたチャンネル一覧", "\n")}
-	for _, v := range responseJSON.Channels {
-		if targetDateUnixTime > v.CreatedAt {
-			continue
+		res, err := client.Do(req)
+		if err != nil {
+			fmt.Println(err)
 		}
 
-		sendText = append(sendText, fmt.Sprintf("%s%s%s", "チャンネル名:", v.Name, "\n"))
+		body, err := ioutil.ReadAll(res.Body)
 
-		t := time.Unix(v.CreatedAt, 0)
-		sendText = append(sendText, fmt.Sprintf("%s%s%s", "作成日:", t.Format("2006/01/02"), "\n"))
-
-		if v.Topic.Value != "" {
-			sendText = append(sendText, fmt.Sprintf("%s%s%s", "トピック:", v.Topic.Value, "\n"))
+		var responseJSON responseJSON
+		err = json.Unmarshal(body, &responseJSON)
+		if err != nil {
+			fmt.Println(err)
 		}
 
-		if v.Description.Value != "" {
-			sendText = append(sendText, fmt.Sprintf("%s%s%s", "説明:", v.Description.Value, "\n"))
-		}
-		sendText = append(sendText, "\n")
+		for _, v := range responseJSON.Channels {
+			if targetDateUnixTime > v.CreatedAt {
+				continue
+			}
 
+			sendText = append(sendText, "==================================\n")
+			sendText = append(sendText, fmt.Sprintf("%s<%s/%s|#%s>\n", "チャンネル名:", slackWorkSpaceURL, v.ID, v.Name))
+
+			t := time.Unix(v.CreatedAt, 0)
+			sendText = append(sendText, fmt.Sprintf("%s%s\n", "作成日:", t.Format("2006/01/02")))
+
+			if v.Topic.Value != "" {
+				sendText = append(sendText, fmt.Sprintf("%s%s\n", "トピック:", v.Topic.Value))
+			}
+
+			if v.Description.Value != "" {
+				sendText = append(sendText, fmt.Sprintf("%s%s\n", "説明:", v.Description.Value))
+			}
+		}
+
+		res.Body.Close()
+
+		if responseJSON.MetaData.NextCursor == "" {
+			break
+		}
+		cursor = responseJSON.MetaData.NextCursor
 	}
+
+	sendText = append(sendText, "==================================\n")
 
 	values := url.Values{}
 	values.Set("token", token)
@@ -110,6 +138,4 @@ func main() {
 	}
 
 	defer response.Body.Close()
-	body, err = ioutil.ReadAll(response.Body)
-	fmt.Println(string(body))
 }
