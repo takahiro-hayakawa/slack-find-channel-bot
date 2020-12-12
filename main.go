@@ -23,6 +23,7 @@ type channelsJSON struct {
 	CreatedAt   int64           `json:"created"`
 	Topic       topicJSON       `json:"topic"`
 	Description descriptionJSON `json:"purpose"`
+	MembersNum  int64           `json:"num_members"`
 }
 
 type topicJSON struct {
@@ -100,6 +101,7 @@ func main() {
 
 			sendText = append(sendText, "==================================\n")
 			sendText = append(sendText, fmt.Sprintf("%s<%s/%s|#%s>\n", "チャンネル名:", slackWorkSpaceURL, v.ID, v.Name))
+			sendText = append(sendText, fmt.Sprintf("%s%d\n", "参加人数:", v.MembersNum))
 
 			t := time.Unix(v.CreatedAt, 0)
 			sendText = append(sendText, fmt.Sprintf("%s%s\n", "作成日:", t.Format("2006/01/02")))
