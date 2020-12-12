@@ -78,7 +78,7 @@ func main() {
 
 	client := http.Client{}
 	channels := findChannelAfterTargetDate(client, targetDateTime)
-	message := makeSlackSendText(targetDateTime, channels)
+	message := makeSlackSendMessage(targetDateTime, channels)
 	sendMessage(client, message)
 }
 
@@ -147,35 +147,39 @@ func findAllChannel(client http.Client) []channel {
 	return channels
 }
 
-func makeSlackSendText(targetDateTime time.Time, channels []channel) []string {
-	sendText := []string{fmt.Sprintf("%s%s\n", targetDateTime.Format("2006/01/02"), "以降に作成されたチャンネル一覧")}
+func makeSlackSendMessage(targetDateTime time.Time, channels []channel) string {
+	if len(channels) == 0 {
+		return fmt.Sprintf("%s%s\n", targetDateTime.Format("2006/01/02"), "以降に作成されたチャンネルはありません")
+	}
+
+	sendMessage := []string{fmt.Sprintf("%s%s\n", targetDateTime.Format("2006/01/02"), "以降に作成されたチャンネル一覧")}
 	for _, v := range channels {
 
-		sendText = append(sendText, "====================================\n")
-		sendText = append(sendText, fmt.Sprintf("%s<%s/%s|#%s>\n", "チャンネル名:", slackWorkSpaceURL, v.ID, v.Name))
-		sendText = append(sendText, fmt.Sprintf("%s%d\n", "参加人数:", v.MemberNum))
+		sendMessage = append(sendMessage, "====================================\n")
+		sendMessage = append(sendMessage, fmt.Sprintf("%s<%s/%s|#%s>\n", "チャンネル名:", slackWorkSpaceURL, v.ID, v.Name))
+		sendMessage = append(sendMessage, fmt.Sprintf("%s%d\n", "参加人数:", v.MemberNum))
 
 		t := time.Unix(v.CreatedAt, 0)
-		sendText = append(sendText, fmt.Sprintf("%s%s\n", "作成日:", t.Format("2006/01/02")))
+		sendMessage = append(sendMessage, fmt.Sprintf("%s%s\n", "作成日:", t.Format("2006/01/02")))
 
 		if v.Topic != "" {
-			sendText = append(sendText, fmt.Sprintf("%s%s\n", "トピック:", v.Topic))
+			sendMessage = append(sendMessage, fmt.Sprintf("%s%s\n", "トピック:", v.Topic))
 		}
 
 		if v.Description != "" {
-			sendText = append(sendText, fmt.Sprintf("%s%s\n", "説明:", v.Description))
+			sendMessage = append(sendMessage, fmt.Sprintf("%s%s\n", "説明:", v.Description))
 		}
 	}
 
-	sendText = append(sendText, "====================================\n")
-	return sendText
+	sendMessage = append(sendMessage, "====================================\n")
+	return strings.Join(sendMessage, "\n")
 }
 
-func sendMessage(client http.Client, message []string) {
+func sendMessage(client http.Client, message string) {
 	values := url.Values{}
 	values.Set("token", token)
 	values.Add("channel", postChannel)
-	values.Add("text", strings.Join(message, "\n"))
+	values.Add("text", message)
 	request, err := http.NewRequest("POST", slackPostMessageAPIURL, strings.NewReader(values.Encode()))
 	if err != nil {
 		fmt.Println(err)
