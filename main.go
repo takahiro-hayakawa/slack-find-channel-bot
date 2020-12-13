@@ -77,12 +77,12 @@ func main() {
 	}
 
 	client := http.Client{}
-	channels := findChannelAfterTargetDate(client, targetDateTime)
+	channels := findChannelAfterTargetDate(&client, targetDateTime)
 	message := makeSlackSendMessage(targetDateTime, channels)
-	sendMessage(client, message)
+	sendMessage(&client, message)
 }
 
-func findChannelAfterTargetDate(client http.Client, targetDateTime time.Time) []channel {
+func findChannelAfterTargetDate(client *http.Client, targetDateTime time.Time) []channel {
 	allChannels := findAllChannel(client)
 	targetDateUnixTime := targetDateTime.Unix()
 
@@ -97,7 +97,7 @@ func findChannelAfterTargetDate(client http.Client, targetDateTime time.Time) []
 	return channels
 }
 
-func findAllChannel(client http.Client) []channel {
+func findAllChannel(client *http.Client) []channel {
 	var resJSON []responseJSON
 	var cursor string
 
@@ -175,7 +175,7 @@ func makeSlackSendMessage(targetDateTime time.Time, channels []channel) string {
 	return strings.Join(sendMessage, "\n")
 }
 
-func sendMessage(client http.Client, message string) {
+func sendMessage(client *http.Client, message string) {
 	values := url.Values{}
 	values.Set("token", token)
 	values.Add("channel", postChannel)
